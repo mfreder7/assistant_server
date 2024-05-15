@@ -60,54 +60,6 @@ interface ManageCalendarRequest {
   eventId?: string;
 }
 
-app.post("/manageCalendar", async (req: Request, res: Response) => {
-  const {
-    action,
-    date,
-    time,
-    summary,
-    description,
-    eventId,
-  }: ManageCalendarRequest = req.body;
-
-  try {
-    switch (action) {
-      case "query":
-        const events = await queryEvents(date!);
-        res.json(events);
-        break;
-      case "create":
-        const event = await createEvent({
-          date: date!,
-          time: time!,
-          summary: summary!,
-          description: description!,
-        });
-        res.json(event);
-        break;
-      case "update":
-        const updatedEvent = await updateEvent({
-          eventId: eventId!,
-          date: date!,
-          time: time!,
-          summary: summary!,
-          description: description!,
-        });
-        res.json(updatedEvent);
-        break;
-      case "delete":
-        const deleteResponse = await deleteEvent(eventId!);
-        res.json(deleteResponse);
-        break;
-      default:
-        res.status(400).send("Invalid action");
-    }
-  } catch (error) {
-    console.error("Error managing calendar:", error);
-    res.status(500).send('error: check logs, "Error managing calendar"');
-  }
-});
-
 app.post("/communicate", async (req: Request, res: Response) => {
   const { message }: { message: string } = req.body;
 
