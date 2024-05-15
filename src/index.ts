@@ -1,7 +1,7 @@
-const express = require("express");
-const { google } = require("googleapis");
-const dotenv = require("dotenv");
-const OpenAI = require("openai");
+import express, { Request, Response } from "express";
+import { google } from "googleapis";
+import dotenv from "dotenv";
+import OpenAI from "openai";
 
 dotenv.config();
 
@@ -23,14 +23,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-let threadId = null; // Store the thread ID here
+let threadId: string | null = null; // Store the thread ID here
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
 
 // Redirect user to the Google authentication page
-app.get("/auth", (req, res) => {
+app.get("/auth", (req: Request, res: Response) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     scope: ["https://www.googleapis.com/auth/calendar"],
@@ -39,9 +39,9 @@ app.get("/auth", (req, res) => {
 });
 
 // Handle OAuth2 callback
-app.get("/oauth2callback", async (req, res) => {
+app.get("/oauth2callback", async (req: Request, res: Response) => {
   try {
-    const { tokens } = await oauth2Client.getToken(req.query.code);
+    const { tokens } = await oauth2Client.getToken(req.query.code as string);
     oauth2Client.setCredentials(tokens);
     res.send("Authentication successful! You can now use the API.");
     console.log(tokens); // You can store these tokens as needed
@@ -51,31 +51,52 @@ app.get("/oauth2callback", async (req, res) => {
   }
 });
 
-app.post("/manageCalendar", async (req, res) => {
-  const { action, date, time, summary, description, eventId } = req.body;
+interface ManageCalendarRequest {
+  action: "query" | "create" | "update" | "delete";
+  date?: string;
+  time?: string;
+  summary?: string;
+  description?: string;
+  eventId?: string;
+}
+
+app.post("/manageCalendar", async (req: Request, res: Response) => {
+  const {
+    action,
+    date,
+    time,
+    summary,
+    description,
+    eventId,
+  }: ManageCalendarRequest = req.body;
 
   try {
     switch (action) {
       case "query":
-        const events = await queryEvents(date);
+        const events = await queryEvents(date!);
         res.json(events);
         break;
       case "create":
-        const event = await createEvent({ date, time, summary, description });
+        const event = await createEvent({
+          date: date!,
+          time: time!,
+          summary: summary!,
+          description: description!,
+        });
         res.json(event);
         break;
       case "update":
         const updatedEvent = await updateEvent({
-          eventId,
-          date,
-          time,
-          summary,
-          description,
+          eventId: eventId!,
+          date: date!,
+          time: time!,
+          summary: summary!,
+          description: description!,
         });
         res.json(updatedEvent);
         break;
       case "delete":
-        const deleteResponse = await deleteEvent(eventId);
+        const deleteResponse = await deleteEvent(eventId!);
         res.json(deleteResponse);
         break;
       default:
@@ -83,82 +104,61 @@ app.post("/manageCalendar", async (req, res) => {
     }
   } catch (error) {
     console.error("Error managing calendar:", error);
-    res.status(500).send(error.message);
+    res.status(500).send('error: check logs, "Error managing calendar"');
   }
 });
 
-// New endpoint to communicate with OpenAI assistant
-app.post("/communicate", async (req, res) => {
-  const { message } = req.body;
+app.post("/communicate", async (req: Request, res: Response) => {
+  const { message }: { message: string } = req.body;
 
-  // Basic information for the AI assistant to be expected to know. IE. The current date epoch time in milliseconds, user info (TODO: implement user info retrieval), location (), weather forecast (TODO).
   const assistantInfo = {
-    // date from the user
     date: new Date().toISOString(),
   };
 
   try {
-    // If threadId is null, create a new thread
     if (!threadId) {
       const threadResponse = await openai.beta.threads.create();
       console.log("New thread created:", threadResponse);
       threadId = threadResponse.id;
     }
 
-    // Create a new message in the existing thread
     await openai.beta.threads.messages.create(threadId, {
       role: "user",
       content: `Current date: ${assistantInfo.date} \n\n` + message,
       metadata: assistantInfo,
     });
 
-    // Send the message to the assistant
     const run = await openai.beta.threads.runs.createAndPoll(threadId, {
-      assistant_id: process.env.ASSISTANT_ID,
+      assistant_id: process.env.ASSISTANT_ID!,
     });
 
-    // status log
     console.log("Run status:", run.status);
 
     if (run.status === "completed") {
       const messages = await openai.beta.threads.messages.list(threadId);
       console.log("Messages:", messages.data);
-      await messages.data.forEach((element, index) => {
-        if (element.role === "assistant") {
+      messages.data.forEach((element, index) => {
+        if (
+          element.role === "assistant" &&
+          element.content[0].type === "text"
+        ) {
           const text = element.content[0].text.value;
           console.log(`${element.role} > ${text}, INDEX: ${index}`);
-          // get last message from assistant
           if (index === 0) {
             res.json({ replies: text });
           }
         }
-        res.send;
       });
     } else if (run.status === "requires_action") {
       try {
         const parsedFunction = JSON.parse(
-          run.required_action.submit_tool_outputs.tool_calls[0].function
-            .arguments
+          run.required_action?.submit_tool_outputs.tool_calls[0].function
+            .arguments ?? ""
         );
 
         const actionResponse = await handleCalendarAction(parsedFunction);
 
         console.log("Action response:", actionResponse);
-
-        // Send the response back to the assistant
-        // Example:
-        // await openai.beta.threads.runs.submitToolOutputs(
-        //   "thread_123",
-        //   "run_123",
-        //   {
-        //     tool_outputs: [
-        //       {
-        //         tool_call_id: "call_001",
-        //         output: "70 degrees and sunny.",
-        //       },
-        //     ],
-        //   }
-        // );
 
         const sendResponse = await openai.beta.threads.runs.submitToolOutputs(
           threadId,
@@ -167,7 +167,7 @@ app.post("/communicate", async (req, res) => {
             tool_outputs: [
               {
                 tool_call_id:
-                  run.required_action.submit_tool_outputs.tool_calls[0].id,
+                  run.required_action?.submit_tool_outputs.tool_calls[0].id,
                 output: JSON.stringify(actionResponse),
               },
             ],
@@ -177,8 +177,6 @@ app.post("/communicate", async (req, res) => {
         console.log("Action response sent:", sendResponse);
 
         res.json({ replies: "Action response sent" });
-
-        // TODO: Handle the response from the assistant
       } catch {
         console.error("Error parsing assistant function call:", run);
         res.status(500).send("Failed to parse assistant function call");
@@ -193,7 +191,7 @@ app.post("/communicate", async (req, res) => {
   }
 });
 
-async function handleCalendarAction(data) {
+async function handleCalendarAction(data: any) {
   switch (data.action) {
     case "query":
       return await queryEvents(data.date);
@@ -208,7 +206,7 @@ async function handleCalendarAction(data) {
   }
 }
 
-async function queryEvents(date) {
+async function queryEvents(date: string) {
   const response = await calendar.events.list({
     calendarId: "primary",
     timeMin: new Date(date).toISOString(),
@@ -219,39 +217,61 @@ async function queryEvents(date) {
   return response.data.items;
 }
 
-async function createEvent({ date, time, summary, description }) {
+async function createEvent({
+  date,
+  time,
+  summary,
+  description,
+}: {
+  date: string;
+  time: string;
+  summary: string;
+  description: string;
+}) {
   const event = {
-    summary: summary,
-    description: description,
+    summary,
+    description,
     start: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
     end: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
   };
   const response = await calendar.events.insert({
     calendarId: "primary",
-    resource: event,
+    requestBody: event,
   });
   return response.data;
 }
 
-async function updateEvent({ eventId, date, time, summary, description }) {
+async function updateEvent({
+  eventId,
+  date,
+  time,
+  summary,
+  description,
+}: {
+  eventId: string;
+  date: string;
+  time: string;
+  summary: string;
+  description: string;
+}) {
   const event = {
-    summary: summary,
-    description: description,
+    summary,
+    description,
     start: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
     end: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
   };
   const response = await calendar.events.update({
     calendarId: "primary",
-    eventId: eventId,
-    resource: event,
+    eventId,
+    requestBody: event,
   });
   return response.data;
 }
 
-async function deleteEvent(eventId) {
+async function deleteEvent(eventId: string) {
   const response = await calendar.events.delete({
     calendarId: "primary",
-    eventId: eventId,
+    eventId,
   });
   return response.data;
 }
