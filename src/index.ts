@@ -2,6 +2,9 @@ import express, { Request, Response } from "express";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { BehaviorSubject } from "rxjs";
+import { ConversationState } from "./types/interfaces";
+import { Run } from "openai/resources/beta/threads/runs/runs";
 
 dotenv.config();
 
@@ -24,9 +27,35 @@ const openai = new OpenAI({
 });
 
 let threadId: string | null = null; // Store the thread ID here
+const $runObserver: BehaviorSubject<ConversationState> =
+  new BehaviorSubject<ConversationState>({
+    status: "expired",
+  });
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+
+  // Subscribe to the conversation state
+  $runObserver.subscribe((state) => {
+    console.log("Conversation state:", state, threadId);
+    // if threadId is not set, return
+    if (!threadId) return;
+
+    switch (state.status) {
+      //"expired" | "queued" | "in_progress" | "requires_action" | "cancelling" | "cancelled" | "failed" | "completed"
+      case "completed":
+        // Handle the completed conversation
+        handleMessageReturn(state.run!, threadId!, state.res!);
+        break;
+      case "requires_action":
+        // Handle the assistant action
+        handleAssistantAction(state.run!, threadId!);
+        break;
+      default:
+        // Handle other states
+        break;
+    }
+  });
 });
 
 // Redirect user to the Google authentication page
@@ -50,15 +79,6 @@ app.get("/oauth2callback", async (req: Request, res: Response) => {
     res.status(500).send("Authentication failed");
   }
 });
-
-interface ManageCalendarRequest {
-  action: "query" | "create" | "update" | "delete";
-  date?: string;
-  time?: string;
-  summary?: string;
-  description?: string;
-  eventId?: string;
-}
 
 app.post("/communicate", async (req: Request, res: Response) => {
   const { message }: { message: string } = req.body;
@@ -84,66 +104,71 @@ app.post("/communicate", async (req: Request, res: Response) => {
       assistant_id: process.env.ASSISTANT_ID!,
     });
 
-    console.log("Run status:", run.status);
-
-    if (run.status === "completed") {
-      const messages = await openai.beta.threads.messages.list(threadId);
-      console.log("Messages:", messages.data);
-      messages.data.forEach((element, index) => {
-        if (
-          element.role === "assistant" &&
-          element.content[0].type === "text"
-        ) {
-          const text = element.content[0].text.value;
-          console.log(`${element.role} > ${text}, INDEX: ${index}`);
-          if (index === 0) {
-            res.json({ replies: text });
-          }
-        }
-      });
-    } else if (run.status === "requires_action") {
-      try {
-        const parsedFunction = JSON.parse(
-          run.required_action?.submit_tool_outputs.tool_calls[0].function
-            .arguments ?? ""
-        );
-
-        const actionResponse = await handleCalendarAction(parsedFunction);
-
-        console.log("Action response:", actionResponse);
-
-        const sendResponse = await openai.beta.threads.runs.submitToolOutputs(
-          threadId,
-          run.id,
-          {
-            tool_outputs: [
-              {
-                tool_call_id:
-                  run.required_action?.submit_tool_outputs.tool_calls[0].id,
-                output: JSON.stringify(actionResponse),
-              },
-            ],
-          }
-        );
-
-        console.log("Action response sent:", sendResponse);
-
-        res.json({ replies: "Action response sent" });
-      } catch {
-        console.error("Error parsing assistant function call:", run);
-        res.status(500).send("Failed to parse assistant function call");
-      }
-    } else {
-      res.status(500).send(run.status);
-      console.error("Assistant run failed:", run);
-    }
+    // update the conversation state and keep unchanged data
+    $runObserver.next({ ...$runObserver.value, run, status: run.status, res });
   } catch (aiError) {
     console.error("Error communicating with OpenAI:", aiError);
     res.status(500).send("Failed to communicate with assistant");
   }
 });
 
+async function handleMessageReturn(run: Run, threadId: string, res?: Response) {
+  try {
+    const messages = await openai.beta.threads.messages.list(threadId);
+    console.log("Messages:", messages.data);
+    messages.data.forEach((element, index) => {
+      if (element.role === "assistant" && element.content[0].type === "text") {
+        const text = element.content[0].text.value;
+        console.log(`${element.role} > ${text}, INDEX: ${index}`);
+        if (index === 0) {
+          res?.json({ replies: text });
+          res?.send();
+        }
+      }
+    });
+  } catch {
+    console.error("Error handling messages");
+  }
+}
+
+async function handleAssistantAction(run: Run, threadId: string) {
+  try {
+    const parsedFunction = JSON.parse(
+      run.required_action?.submit_tool_outputs.tool_calls[0].function
+        .arguments ?? ""
+    );
+
+    const actionResponse = await handleCalendarAction(parsedFunction);
+
+    console.log("Action response:", actionResponse);
+
+    const sendResponse =
+      await openai.beta.threads.runs.submitToolOutputsAndPoll(
+        threadId,
+        run.id,
+        {
+          tool_outputs: [
+            {
+              tool_call_id:
+                run.required_action?.submit_tool_outputs.tool_calls[0].id,
+              output: JSON.stringify(actionResponse),
+            },
+          ],
+        }
+      );
+
+    console.log("Action response sent:", sendResponse);
+    // set new conversation state
+    $runObserver.next({
+      ...$runObserver.value,
+      run: sendResponse,
+      status: "completed",
+    });
+  } catch {}
+}
+
 async function handleCalendarAction(data: any) {
+  console.log("Calendar action data:", data);
   switch (data.action) {
     case "query":
       return await queryEvents(data.date);
@@ -225,5 +250,10 @@ async function deleteEvent(eventId: string) {
     calendarId: "primary",
     eventId,
   });
-  return response.data;
+
+  // check the response came back successfully
+  if (response.status !== 204) {
+    return { error: "Failed to delete event" };
+  }
+  return { message: "Event deleted successfully" };
 }
