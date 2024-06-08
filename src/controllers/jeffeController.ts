@@ -2,10 +2,10 @@ import { Request, Response } from "express";
 import { BehaviorSubject } from "rxjs";
 import { ConversationState } from "../types/interfaces";
 import {
-  handleMessageReturn,
+  // handleMessageReturn,
   handleAssistantAction,
   openai,
-} from "../services/openaiService";
+} from "../services/jeffeService";
 import { formatDateToTimezone } from "../helpers/dateHelper";
 
 let threadId: string | null = null;
@@ -20,10 +20,10 @@ $runObserver.subscribe((state) => {
 
   switch (state.status) {
     case "completed":
-      handleMessageReturn(state.run!, threadId!, state.res!);
+      // handleMessageReturn(state.run!, threadId!, state.res!);
       break;
     case "requires_action":
-      handleAssistantAction(state.run!, threadId!);
+      // handleAssistantAction(state.run!, threadId!);
       break;
     default:
       break;
@@ -58,7 +58,13 @@ export const communicate = async (req: Request, res: Response) => {
       assistant_id: process.env.ASSISTANT_ID!,
     });
 
-    $runObserver.next({ ...$runObserver.value, run, status: run.status, res });
+    $runObserver.next({
+      ...$runObserver.value,
+      run,
+      status: run.status,
+      date: formattedDate,
+      res,
+    });
   } catch (aiError) {
     console.error("Error communicating with OpenAI:", aiError);
     res.status(500).send("Failed to communicate with assistant");

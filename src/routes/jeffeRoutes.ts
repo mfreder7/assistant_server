@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { communicate } from "../controllers/assistantController";
+import { communicate } from "../controllers/jeffeController";
 
 const router = Router();
 

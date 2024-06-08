@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { Run } from "openai/resources/beta/threads/runs/runs";
 import { Response } from "express";
-import { $runObserver } from "../controllers/assistantController";
+import { $runObserver } from "../controllers/jeffeController";
 import { calendar } from "../controllers/googleApiController";
 
 export const openai = new OpenAI({
@@ -31,38 +31,13 @@ export async function handleMessageReturn(
   }
 }
 
-export async function handleAssistantAction(run: Run, threadId: string) {
+export async function handleAssistantAction(parsedFunction: any) {
   try {
-    const parsedFunction = JSON.parse(
-      run.required_action?.submit_tool_outputs.tool_calls[0].function
-        .arguments ?? ""
-    );
-
     const actionResponse = await handleCalendarAction(parsedFunction);
 
     console.log("Action response:", actionResponse);
 
-    const sendResponse =
-      await openai.beta.threads.runs.submitToolOutputsAndPoll(
-        threadId,
-        run.id,
-        {
-          tool_outputs: [
-            {
-              tool_call_id:
-                run.required_action?.submit_tool_outputs.tool_calls[0].id,
-              output: JSON.stringify(actionResponse),
-            },
-          ],
-        }
-      );
-
-    console.log("Action response sent:", sendResponse);
-    $runObserver.next({
-      ...$runObserver.value,
-      run: sendResponse,
-      status: "completed",
-    });
+    return actionResponse;
   } catch {}
 }
 
@@ -70,7 +45,7 @@ async function handleCalendarAction(data: any) {
   console.log("Calendar action data:", data);
   switch (data.action) {
     case "query":
-      return await queryEvents(data.date);
+      return await queryEvents(data?.date, data?.date_end);
     case "create":
       return await createEvent(data);
     case "update":
@@ -82,10 +57,11 @@ async function handleCalendarAction(data: any) {
   }
 }
 
-async function queryEvents(date: string) {
+async function queryEvents(date?: string, date_end?: string) {
   const response = await calendar.events.list({
     calendarId: "primary",
-    timeMin: new Date(date).toISOString(),
+    timeMin: date ? new Date(date).toISOString() : new Date().toISOString(),
+    timeMax: date_end ? new Date(date_end).toISOString() : undefined,
     maxResults: 10,
     singleEvents: true,
     orderBy: "startTime",
@@ -96,11 +72,15 @@ async function queryEvents(date: string) {
 async function createEvent({
   date,
   time,
+  date_end,
+  time_end,
   summary,
   description,
 }: {
   date: string;
   time: string;
+  date_end: string;
+  time_end: string;
   summary: string;
   description: string;
 }) {
@@ -108,7 +88,7 @@ async function createEvent({
     summary,
     description,
     start: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
-    end: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
+    end: { dateTime: new Date(`${date_end}T${time_end}:00`).toISOString() },
   };
   const response = await calendar.events.insert({
     calendarId: "primary",
@@ -121,12 +101,16 @@ async function updateEvent({
   eventId,
   date,
   time,
+  date_end,
+  time_end,
   summary,
   description,
 }: {
   eventId: string;
   date: string;
   time: string;
+  date_end: string;
+  time_end: string;
   summary: string;
   description: string;
 }) {
@@ -134,7 +118,7 @@ async function updateEvent({
     summary,
     description,
     start: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
-    end: { dateTime: new Date(`${date}T${time}:00`).toISOString() },
+    end: { dateTime: new Date(`${date_end}T${time_end}:00`).toISOString() },
   };
   const response = await calendar.events.update({
     calendarId: "primary",
