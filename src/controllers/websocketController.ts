@@ -1,16 +1,7 @@
 import { WebSocket } from "ws";
 import { formatDateToTimezone } from "../helpers/dateHelper";
-import { openai, handleAssistantAction } from "../services/jeffeService";
-import { $runObserver } from "./jeffeController";
-import { ConversationState } from "../types/interfaces";
-import {
-  FunctionToolCall,
-  ToolCall,
-} from "openai/resources/beta/threads/runs/steps";
-import {
-  RequiredActionFunctionToolCall,
-  Run,
-} from "openai/resources/beta/threads/runs/runs";
+import { handleAssistantAction, openai } from "../services/jeffeService";
+import { RequiredActionFunctionToolCall } from "openai/resources/beta/threads/runs/runs";
 
 let threadId: string | null = null;
 
@@ -27,12 +18,6 @@ export const handleWebSocketMessage = async (
   const assistantInfo = {
     date: formattedDate,
   };
-
-  // Set run observer date to the formatted date
-  $runObserver.next({
-    ...$runObserver.value,
-    date: formattedDate,
-  });
 
   try {
     if (!threadId) {

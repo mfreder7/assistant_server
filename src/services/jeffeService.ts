@@ -1,35 +1,9 @@
 import OpenAI from "openai";
-import { Run } from "openai/resources/beta/threads/runs/runs";
-import { Response } from "express";
-import { $runObserver } from "../controllers/jeffeController";
 import { calendar } from "../controllers/googleApiController";
 
 export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
-
-export async function handleMessageReturn(
-  run: Run,
-  threadId: string,
-  res?: Response
-) {
-  try {
-    const messages = await openai.beta.threads.messages.list(threadId);
-    console.log("Messages:", messages.data);
-    messages.data.forEach((element, index) => {
-      if (element.role === "assistant" && element.content[0].type === "text") {
-        const text = element.content[0].text.value;
-        console.log(`${element.role} > ${text}, INDEX: ${index}`);
-        if (index === 0) {
-          res?.json({ replies: text });
-          res?.send();
-        }
-      }
-    });
-  } catch {
-    console.error("Error handling messages");
-  }
-}
 
 export async function handleAssistantAction(parsedFunction: any) {
   try {
