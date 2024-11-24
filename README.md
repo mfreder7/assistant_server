@@ -1,4 +1,5 @@
 **Please feel free to use this or build on this. I only ask for a small note or credit in your work.**
+_However, note that I did not include a license with this code. This is on purpose, use as you will._
 
 I'm also a starving developer who would love a tip.
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/L3L01PGZ3)
