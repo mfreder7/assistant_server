@@ -13,7 +13,7 @@ The node server for interfacing and handling the GPT assistant schema.
 
 - Google Calendar API
 
-# API's for AI inference - TODO
+# API's for AI inference - **NOTE: with the release of google home's API system, I have decided to remake using their systme. THESE WILL NOT BE COMPLETED.**
 
 ## Location services
 
